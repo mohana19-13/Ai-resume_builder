@@ -1,0 +1,354 @@
+from flask import Flask, request, jsonify, render_template_string, send_file
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+import json
+import io
+import os
+
+# For PDF generation
+from weasyprint import HTML, CSS
+
+# For AI (LLM) integration - replace with actual API key setup
+# import openai
+# openai.api_key = os.getenv("OPENAI_API_KEY")
+# Or for Google Gemini:
+# import google.generativeai as genai
+# genai.configure(api_key=os.getenv("GOOGLE_GEMINI_API_KEY"))
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your_super_secret_key_here' # Change this!
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login' # Where to redirect if not logged in
+
+# --- Database Models ---
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128))
+    resumes = db.relationship('Resume', backref='author', lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+class Resume(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    title = db.Column(db.String(100), nullable=False, default="My Resume")
+    # Store resume content as JSON string
+    content = db.Column(db.Text, nullable=False)
+    date_created = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f'<Resume {self.title}>'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# --- Helper Function for AI (LLM) Interaction ---
+def generate_ai_text(prompt, max_tokens=150, temperature=0.7):
+    """
+    Placeholder for LLM interaction.
+    Replace with actual OpenAI/Gemini API calls.
+    """
+    # Example for OpenAI:
+    # try:
+    #     response = openai.chat.completions.create(
+    #         model="gpt-3.5-turbo", # or "gpt-4"
+    #         messages=[{"role": "user", "content": prompt}],
+    #         max_tokens=max_tokens,
+    #         temperature=temperature
+    #     )
+    #     return response.choices[0].message.content.strip()
+    # except Exception as e:
+    #     print(f"Error calling OpenAI API: {e}")
+    #     return "AI generation failed."
+
+    # Example for Google Gemini:
+    # try:
+    #     model = genai.GenerativeModel('gemini-pro') # or 'gemini-1.5-flash', etc.
+    #     response = model.generate_content(prompt)
+    #     return response.text.strip()
+    # except Exception as e:
+    #     print(f"Error calling Gemini API: {e}")
+    #     return "AI generation failed."
+
+    # Fallback/Mock for demonstration
+    if "summary" in prompt.lower():
+        return "A highly motivated and results-driven professional with a strong background in software development, eager to contribute to innovative projects."
+    elif "bullet point" in prompt.lower() and "experience" in prompt.lower():
+        return "- Developed and deployed a scalable cloud-based application, resulting in a 15% increase in user engagement.\n- Collaborated with cross-functional teams to deliver high-quality software solutions on time."
+    elif "skills" in prompt.lower():
+        return "Python, JavaScript, React, Node.js, AWS, Docker, SQL, Git, Agile Methodologies."
+    else:
+        return "AI generated content placeholder."
+
+# --- Routes ---
+
+@app.route('/')
+def index():
+    return "Welcome to the AI Resume Builder! Use the API or frontend to interact."
+
+# User Authentication
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+
+    if not username or not email or not password:
+        return jsonify({"message": "Missing username, email, or password"}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({"message": "Username already exists"}), 409
+    if User.query.filter_by(email=email).first():
+        return jsonify({"message": "Email already exists"}), 409
+
+    new_user = User(username=username, email=email)
+    new_user.set_password(password)
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({"message": "User registered successfully"}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    user = User.query.filter_by(username=username).first()
+    if user and user.check_password(password):
+        login_user(user)
+        return jsonify({"message": "Logged in successfully", "user_id": user.id}), 200
+    return jsonify({"message": "Invalid username or password"}), 401
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return jsonify({"message": "Logged out successfully"}), 200
+
+# Resume Management
+@app.route('/resume', methods=['POST'])
+@login_required
+def create_resume():
+    data = request.get_json()
+    title = data.get('title', "My Resume")
+    content = data.get('content', {}) # Expecting structured JSON data for resume sections
+
+    new_resume = Resume(user_id=current_user.id, title=title, content=json.dumps(content))
+    db.session.add(new_resume)
+    db.session.commit()
+    return jsonify({"message": "Resume created successfully", "resume_id": new_resume.id}), 201
+
+@app.route('/resume/<int:resume_id>', methods=['GET'])
+@login_required
+def get_resume(resume_id):
+    resume = Resume.query.filter_by(id=resume_id, user_id=current_user.id).first()
+    if not resume:
+        return jsonify({"message": "Resume not found or not authorized"}), 404
+    return jsonify({"id": resume.id, "title": resume.title, "content": json.loads(resume.content)}), 200
+
+@app.route('/resume/<int:resume_id>', methods=['PUT'])
+@login_required
+def update_resume(resume_id):
+    resume = Resume.query.filter_by(id=resume_id, user_id=current_user.id).first()
+    if not resume:
+        return jsonify({"message": "Resume not found or not authorized"}), 404
+
+    data = request.get_json()
+    if 'title' in data:
+        resume.title = data['title']
+    if 'content' in data:
+        resume.content = json.dumps(data['content'])
+
+    db.session.commit()
+    return jsonify({"message": "Resume updated successfully"}), 200
+
+@app.route('/resume/<int:resume_id>', methods=['DELETE'])
+@login_required
+def delete_resume(resume_id):
+    resume = Resume.query.filter_by(id=resume_id, user_id=current_user.id).first()
+    if not resume:
+        return jsonify({"message": "Resume not found or not authorized"}), 404
+    db.session.delete(resume)
+    db.session.commit()
+    return jsonify({"message": "Resume deleted successfully"}), 200
+
+# AI-Assisted Generation
+@app.route('/ai/generate', methods=['POST'])
+@login_required
+def ai_generate():
+    data = request.get_json()
+    prompt_type = data.get('type') # e.g., 'summary', 'experience_bullet', 'skills'
+    input_text = data.get('input') # User's initial text or context
+
+    generated_content = ""
+    if prompt_type == 'summary':
+        prompt = f"Generate a compelling professional summary for a resume based on the following information: {input_text}"
+        generated_content = generate_ai_text(prompt, max_tokens=100)
+    elif prompt_type == 'experience_bullet':
+        prompt = f"Expand the following work experience into concise and impactful resume bullet points, focusing on achievements and quantifiable results: {input_text}"
+        generated_content = generate_ai_text(prompt, max_tokens=150)
+    elif prompt_type == 'skills_suggestion':
+        prompt = f"Suggest relevant technical and soft skills for a resume based on the following job role/experience: {input_text}. List them concisely."
+        generated_content = generate_ai_text(prompt, max_tokens=80)
+    else:
+        return jsonify({"message": "Invalid generation type"}), 400
+
+    return jsonify({"generated_text": generated_content}), 200
+
+# PDF Export
+@app.route('/resume/<int:resume_id>/pdf', methods=['GET'])
+@login_required
+def export_resume_pdf(resume_id):
+    resume = Resume.query.filter_by(id=resume_id, user_id=current_user.id).first()
+    if not resume:
+        return jsonify({"message": "Resume not found or not authorized"}), 404
+
+    resume_data = json.loads(resume.content)
+
+    # --- HTML Template for Resume ---
+    # This is a basic example. You would have a more complex and styled HTML template.
+    # You can load this from a file or render it using Jinja2 templates.
+    html_template = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{{ resume.title }}</title>
+        <style>
+            body { font-family: sans-serif; margin: 40px; line-height: 1.6; color: #333; }
+            h1, h2, h3 { color: #2c3e50; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            section { margin-bottom: 25px; page-break-inside: avoid; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .header h1 { margin: 0; font-size: 2.2em; }
+            .header p { margin: 5px 0; font-size: 0.9em; }
+            .section-title { font-size: 1.4em; border-bottom: 2px solid #ddd; padding-bottom: 5px; margin-bottom: 15px; }
+            ul { list-style-type: disc; margin-left: 20px; }
+            .experience-item, .education-item, .project-item { margin-bottom: 15px; }
+            .experience-item h3, .education-item h3, .project-item h3 { margin-bottom: 5px; font-size: 1.1em; }
+            .experience-item p, .education-item p, .project-item p { margin: 0; font-size: 0.9em; }
+            .skills-list { display: flex; flex-wrap: wrap; gap: 10px; }
+            .skill-category { flex-basis: 100%; margin-bottom: 5px; font-weight: bold; }
+            .skill-item { background-color: #eee; padding: 3px 8px; border-radius: 3px; font-size: 0.85em; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>{{ resume.personal_info.name }}</h1>
+            <p>{{ resume.personal_info.email }} | {{ resume.personal_info.phone }} | {{ resume.personal_info.linkedin }} | {{ resume.personal_info.portfolio }}</p>
+        </div>
+
+        {% if resume.summary %}
+        <section>
+            <h2 class="section-title">Summary</h2>
+            <p>{{ resume.summary }}</p>
+        </section>
+        {% endif %}
+
+        {% if resume.experience %}
+        <section>
+            <h2 class="section-title">Experience</h2>
+            {% for exp in resume.experience %}
+            <div class="experience-item">
+                <h3>{{ exp.title }} at {{ exp.company }}</h3>
+                <p>{{ exp.start_date }} - {{ exp.end_date }}</p>
+                <ul>
+                    {% for bullet in exp.responsibilities %}
+                    <li>{{ bullet }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        {% if resume.education %}
+        <section>
+            <h2 class="section-title">Education</h2>
+            {% for edu in resume.education %}
+            <div class="education-item">
+                <h3>{{ edu.degree }} from {{ edu.institution }}</h3>
+                <p>{{ edu.start_date }} - {{ edu.end_date }}</p>
+                <p>{{ edu.gpa }}</p>
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        {% if resume.skills %}
+        <section>
+            <h2 class="section-title">Skills</h2>
+            <div class="skills-list">
+                {% for category, skills_list in resume.skills.items() %}
+                <span class="skill-category">{{ category }}:</span>
+                {% for skill in skills_list %}
+                <span class="skill-item">{{ skill }}</span>
+                {% endfor %}
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% if resume.projects %}
+        <section>
+            <h2 class="section-title">Projects</h2>
+            {% for proj in resume.projects %}
+            <div class="project-item">
+                <h3>{{ proj.name }}</h3>
+                <p>{{ proj.description }}</p>
+                {% if proj.link %}<p><a href="{{ proj.link }}">Project Link</a></p>{% endif %}
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+    </body>
+    </html>
+    """
+    # Render the HTML template with resume data
+    # For a real app, use Flask's render_template with a separate .html file
+    from jinja2 import Template
+    template = Template(html_template)
+    rendered_html = template.render(resume=resume_data)
+
+    # Generate PDF
+    pdf_file = HTML(string=rendered_html).write_pdf()
+
+    # Create a BytesIO buffer to hold the PDF data
+    buffer = io.BytesIO(pdf_file)
+    buffer.seek(0) # Rewind the buffer to the beginning
+
+    return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=f"{resume.title.replace(' ', '_')}.pdf")
+
+# Initialize database
+@app.before_first_request
+def create_tables():
+    db.create_all()
+
+if __name__ == '__main__':
+    # To run:
+    # 1. FLASK_APP=app.py flask run
+    # 2. Or if running directly:
+    #    with app.app_context():
+    #        db.create_all()
+    #    app.run(debug=True)
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True, port=5000)
+
