@@ -1,0 +1,56 @@
+{
+    "personal_info": {
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "phone": "+91 9876543210",
+        "linkedin": "linkedin.com/in/johndoe",
+        "portfolio": "johndoe.dev"
+    },
+    "summary": "AI-generated summary goes here. This will be populated by the LLM based on user input for experience, skills, etc.",
+    "experience": [
+        {
+            "title": "Software Engineer",
+            "company": "Tech Solutions Inc.",
+            "start_date": "Jan 2022",
+            "end_date": "Present",
+            "responsibilities": [
+                "Led development of a new microservices architecture.",
+                "Implemented CI/CD pipelines, reducing deployment time by 30%.",
+                "Mentored junior developers."
+            ]
+        },
+        {
+            "title": "Junior Developer",
+            "company": "Startup Innovations",
+            "start_date": "July 2020",
+            "end_date": "Dec 2021",
+            "responsibilities": [
+                "Assisted in frontend development using React.",
+                "Wrote unit tests and debugged applications."
+            ]
+        }
+    ],
+    "education": [
+        {
+            "degree": "B.Tech in Computer Science",
+            "institution": "University of Technology",
+            "start_date": "Aug 2016",
+            "end_date": "May 2020",
+            "gpa": "3.8/4.0"
+        }
+    ],
+    "skills": {
+        "Programming Languages": ["Python", "JavaScript", "Java", "C++"],
+        "Web Technologies": ["React", "Node.js", "Flask", "Django", "REST APIs"],
+        "Cloud Platforms": ["AWS", "Google Cloud Platform"],
+        "Databases": ["PostgreSQL", "MongoDB", "SQLite"],
+        "Tools & Methodologies": ["Git", "Docker", "Kubernetes", "Agile", "Scrum"]
+    },
+    "projects": [
+        {
+            "name": "E-commerce Platform",
+            "description": "Developed a full-stack e-commerce website with user authentication, product catalog, and payment gateway integration.",
+            "link": "github.com/johndoe/ecommerce-project"
+        }
+    ]
+}
